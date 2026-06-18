@@ -2,17 +2,83 @@ const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
+const https = require('https');
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 500 * 1024 * 1024 } });
 app.use(cors());
+
+// ══ KEYS env (Railway locker) se — code mein expose nahi ══
+const BUNNY_KEY = process.env.BUNNY_KEY || '';
+const BUNNY_ZONE = process.env.BUNNY_ZONE || '';
+const BUNNY_PULLZONE = (process.env.BUNNY_PULLZONE || '').replace(/\/$/,'');
+const GEMINI_KEY = process.env.GEMINI_KEY || '';
+
 let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
+
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ffmpeg: FFMPEG_BIN }));
-app.get('/api/bunny-list',(req,res)=>{const{zone,key}=req.query;if(!zone||!key)return res.status(400).json({error:'Missing params'});const https=require('https');const r=https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(zone)+'/',method:'GET',headers:{'AccessKey':key,'Accept':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});r.on('error',e=>res.status(500).json({error:e.message}));r.end();});
-app.post('/api/bunny-upload',(req,res)=>{const{zone,key,file}=req.query;if(!zone||!key||!file)return res.status(400).json({error:'Missing params'});const https=require('https');const chunks=[];req.on('data',c=>chunks.push(c));req.on('end',()=>{const body=Buffer.concat(chunks);const r=https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(zone)+'/'+encodeURIComponent(file),method:'PUT',headers:{'AccessKey':key,'Content-Type':'video/mp4','Content-Length':body.length}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300}));});r.on('error',e=>res.status(500).json({error:e.message}));r.write(body);r.end();});});
-app.delete('/api/bunny-delete',(req,res)=>{const{zone,key,file}=req.query;if(!zone||!key||!file)return res.status(400).json({error:'Missing params'});const https=require('https');const fname=decodeURIComponent(file);const r=https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(zone)+'/'+fname,method:'DELETE',headers:{'AccessKey':key}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300}));});r.on('error',e=>res.status(500).json({error:e.message}));r.end();});
+app.get('/health', (req, res) => res.json({ status: 'ok', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+
+// ══ Public config — user app ko sirf pullzone + flags milte hain (keys NAHI) ══
+app.get('/api/config', (req, res) => {
+  res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY });
+});
+
+// ══ GEMINI hooks — key server par ══
+app.post('/api/gemini', async (req, res) => {
+  if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });
+  const prompt = req.body.prompt || '';
+  if (!prompt) return res.status(400).json({ error: 'No prompt' });
+  const body = JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9,maxOutputTokens:8192} });
+  const models = ['gemini-2.5-flash','gemini-2.5-flash-preview-04-17'];
+  for (const m of models) {
+    try {
+      const r = await new Promise((resolve,reject)=>{
+        const rq = https.request({hostname:'generativelanguage.googleapis.com',path:'/v1beta/models/'+m+':generateContent?key='+GEMINI_KEY,method:'POST',headers:{'Content-Type':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>resolve({status:resp.statusCode,data:d}));});
+        rq.on('error',reject); rq.write(body); rq.end();
+      });
+      if (r.status === 200) {
+        const j = JSON.parse(r.data);
+        const text = j?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (text) return res.json({ text });
+      }
+    } catch(e) { continue; }
+  }
+  res.status(500).json({ error: 'Gemini failed' });
+});
+
+// ══ BUNNY list — key server par ══
+app.get('/api/bunny-list', (req, res) => {
+  if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
+  const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/',method:'GET',headers:{'AccessKey':BUNNY_KEY,'Accept':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});
+  r.on('error',e=>res.status(500).json({error:e.message})); r.end();
+});
+
+// ══ BUNNY upload — key server par (user app ko key na chahiye) ══
+app.post('/api/bunny-upload', (req, res) => {
+  if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
+  const file = req.query.file;
+  if (!file) return res.status(400).json({ error: 'No filename' });
+  const chunks = [];
+  req.on('data', c => chunks.push(c));
+  req.on('end', () => {
+    const bodyBuf = Buffer.concat(chunks);
+    const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(file),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'video/mp4','Content-Length':bodyBuf.length}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300,url:BUNNY_PULLZONE+'/'+file}));});
+    r.on('error',e=>res.status(500).json({error:e.message})); r.write(bodyBuf); r.end();
+  });
+});
+
+// ══ BUNNY delete — key server par ══
+app.delete('/api/bunny-delete', (req, res) => {
+  if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
+  const file = req.query.file;
+  if (!file) return res.status(400).json({ error: 'No filename' });
+  const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+decodeURIComponent(file),method:'DELETE',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300}));});
+  r.on('error',e=>res.status(500).json({error:e.message})); r.end();
+});
+
+// ══ RENDER (FFmpeg overlay) ══
 app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
   const vf = req.files['video']?.[0]; if (!vf) return res.status(400).json({ error: 'No video' });
   const of = req.files['overlay']?.[0];
@@ -30,12 +96,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     tf = tf || '';
     const scaleF = tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2';
     const fcOv = '[0:v]' + tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2,format=yuv420p[base];[1:v]scale=' + rW + ':' + rH + ':force_original_aspect_ratio=disable,format=rgba[ov];[base][ov]overlay=0:0:format=auto,format=yuv420p';
-    const trimArgs = dur > 0
-      ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)]
-      : ['-ss', String(ts), '-i', vf.path];
-    const args = of
-      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','16','-c:a','aac','-movflags','+faststart',out]
-      : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','16','-c:a','aac','-movflags','+faststart',out];
+    const trimArgs = dur > 0 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
+    const args = of ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','16','-c:a','aac','-movflags','+faststart',out] : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','16','-c:a','aac','-movflags','+faststart',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });
@@ -78,5 +140,6 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     });
   } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : ''); }
 });
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v2.4 on port ' + PORT));
+app.listen(PORT, () => console.log('VyralJin Server v3.0 (env keys) on port ' + PORT));

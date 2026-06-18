@@ -30,7 +30,8 @@ app.post('/api/gemini', async (req, res) => {
   if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });
   const prompt = req.body.prompt || '';
   if (!prompt) return res.status(400).json({ error: 'No prompt' });
-  const body = JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9,maxOutputTokens:8192} });
+  const maxTok = parseInt(req.body.maxTokens) || 8192;
+  const body = JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9,maxOutputTokens:maxTok} });
   const models = ['gemini-2.5-flash','gemini-2.5-flash-preview-04-17'];
   for (const m of models) {
     try {

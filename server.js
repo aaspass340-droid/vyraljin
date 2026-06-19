@@ -79,7 +79,7 @@ app.delete('/api/bunny-delete', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
-// ══ RENDER (FFmpeg overlay) ══
+// ══ RENDER (FFmpeg overlay) — badi video ke liye optimized ══
 app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
   const vf = req.files['video']?.[0]; if (!vf) return res.status(400).json({ error: 'No video' });
   const of = req.files['overlay']?.[0];
@@ -97,8 +97,11 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     tf = tf || '';
     const scaleF = tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2';
     const fcOv = '[0:v]' + tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2,format=yuv420p[base];[1:v]scale=' + rW + ':' + rH + ':force_original_aspect_ratio=disable,format=rgba[ov];[base][ov]overlay=0:0:format=auto,format=yuv420p';
+    // Trim ko INPUT se pehle rakho (-ss before -i) = tez seek, kam memory
     const trimArgs = dur > 0 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
-    const args = of ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out] : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out];
+    const args = of
+      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out]
+      : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });
@@ -143,4 +146,4 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v3.0 (env keys) on port ' + PORT));
+app.listen(PORT, () => console.log('VyralJin Server v3.1 (optimized) on port ' + PORT));

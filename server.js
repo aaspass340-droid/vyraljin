@@ -92,21 +92,19 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   const clientPortrait = req.body.isPortrait === '1';
   const { spawn } = require('child_process');
   let _rendered = false;
-  function doRender(tf) {
+  function doRender(tf, hasAudio) {
     if (_rendered) return; _rendered = true;
     tf = tf || '';
-    const evW0 = rW % 2 === 0 ? rW : rW + 1;
-    const evH0 = rH % 2 === 0 ? rH : rH + 1;
-    const scaleF = tf + 'scale=' + evW0 + ':' + evH0 + ':force_original_aspect_ratio=decrease,pad=' + evW0 + ':' + evH0 + ':(ow-iw)/2:(oh-ih)/2,setsar=1';
-    // Even dimensions (libx264 ko 2 se divisible chahiye) — odd size par "frame 0" crash hota hai
     const evW = rW % 2 === 0 ? rW : rW + 1;
     const evH = rH % 2 === 0 ? rH : rH + 1;
+    const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
     const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p';
-    // Trim ko INPUT se pehle rakho (-ss before -i) = tez seek, kam memory
-    const trimArgs = dur > 0 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
+    const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
+    // ✅ Audio: agar haste to copy (fast), nahi to -an
+    const audioArgs = hasAudio ? ['-c:a','copy'] : ['-an'];
     const args = of
-      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out]
-      : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out];
+      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out]
+      : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });
@@ -124,19 +122,22 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   }
   let FFPROBE_BIN = 'ffprobe';
   try { const s = require('ffprobe-static'); if(s && s.path) FFPROBE_BIN = s.path; } catch(e) {}
-  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : ''); }, 4000);
+  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', false); }, 8000);
   try {
     const probe = spawn(FFPROBE_BIN, ['-v','quiet','-print_format','json','-show_streams',vf.path]);
     let probeOut = '';
     probe.stdout.on('data', d => probeOut += d);
     probe.stderr.on('data', ()=>{});
-    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : ''); });
+    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); });
     probe.on('close', () => {
       clearTimeout(fbTimer);
       let tf = '';
+      let hasAudio = false;
       try {
         const info = JSON.parse(probeOut || '{}');
         const vs = info.streams?.find(s => s.codec_type==='video');
+        const as = info.streams?.find(s => s.codec_type==='audio');
+        hasAudio = !!as;
         const rot = Math.abs(parseInt(vs?.tags?.rotate || vs?.side_data_list?.[0]?.rotation || '0'));
         if (rot === 90) tf = 'transpose=1,';
         else if (rot === 270) tf = 'transpose=2,';
@@ -145,9 +146,9 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
           if (rawW > rawH) tf = 'transpose=1,';
         }
       } catch(e) {}
-      doRender(tf);
+      doRender(tf, hasAudio);
     });
-  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : ''); }
+  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); }
 });
 
 const PORT = process.env.PORT || 3000;

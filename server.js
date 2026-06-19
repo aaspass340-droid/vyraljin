@@ -100,8 +100,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
     const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p';
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
-    // ✅ Audio: agar haste to copy (fast), nahi to -an
-    const audioArgs = hasAudio ? ['-c:a','copy'] : ['-an'];
+    // ✅ Audio: trim ke saath copy CRASH karta hai ("frame 0") — re-encode zaroori
+    const audioArgs = hasAudio ? ['-c:a','aac','-b:a','128k'] : ['-an'];
     const args = of
       ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out]
       : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];

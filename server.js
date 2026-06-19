@@ -98,7 +98,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const scaleF = tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2';
     const fcOv = '[0:v]' + tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2,format=yuv420p[base];[1:v]scale=' + rW + ':' + rH + ':force_original_aspect_ratio=disable,format=rgba[ov];[base][ov]overlay=0:0:format=auto,format=yuv420p';
     const trimArgs = dur > 0 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
-    const args = of ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','16','-c:a','aac','-movflags','+faststart',out] : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','16','-c:a','aac','-movflags','+faststart',out];
+    const args = of ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out] : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });
@@ -112,7 +112,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
       s.on('end', () => fs.unlink(out, ()=>{}));
       s.on('error', () => fs.unlink(out, ()=>{}));
     });
-    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) res.status(500).json({ error: 'Timeout' }); }, 180000);
+    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) res.status(500).json({ error: 'Timeout' }); }, 280000);
   }
   let FFPROBE_BIN = 'ffprobe';
   try { const s = require('ffprobe-static'); if(s && s.path) FFPROBE_BIN = s.path; } catch(e) {}

@@ -108,7 +108,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     ff.on('close', code => {
       fs.unlink(vf.path, ()=>{});
       if (of) fs.unlink(of.path, ()=>{});
-      if (code !== 0) return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-400) });
+      if (code !== 0) return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-1500) });
       res.setHeader('Content-Type','video/mp4');
       const s = fs.createReadStream(out);
       s.pipe(res);

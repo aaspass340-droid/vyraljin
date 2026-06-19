@@ -95,8 +95,13 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   function doRender(tf) {
     if (_rendered) return; _rendered = true;
     tf = tf || '';
-    const scaleF = tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2';
-    const fcOv = '[0:v]' + tf + 'scale=' + rW + ':' + rH + ':force_original_aspect_ratio=decrease,pad=' + rW + ':' + rH + ':(ow-iw)/2:(oh-ih)/2,format=yuv420p[base];[1:v]scale=' + rW + ':' + rH + ':force_original_aspect_ratio=disable,format=rgba[ov];[base][ov]overlay=0:0:format=auto,format=yuv420p';
+    const evW0 = rW % 2 === 0 ? rW : rW + 1;
+    const evH0 = rH % 2 === 0 ? rH : rH + 1;
+    const scaleF = tf + 'scale=' + evW0 + ':' + evH0 + ':force_original_aspect_ratio=decrease,pad=' + evW0 + ':' + evH0 + ':(ow-iw)/2:(oh-ih)/2,setsar=1';
+    // Even dimensions (libx264 ko 2 se divisible chahiye) — odd size par "frame 0" crash hota hai
+    const evW = rW % 2 === 0 ? rW : rW + 1;
+    const evH = rH % 2 === 0 ? rH : rH + 1;
+    const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p';
     // Trim ko INPUT se pehle rakho (-ss before -i) = tez seek, kam memory
     const trimArgs = dur > 0 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
     const args = of

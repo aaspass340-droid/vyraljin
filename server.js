@@ -1,16 +1,3 @@
-Achha! Samajh aaya. 🎯 Tum **Admin app** ke andar server.js ka code update karte ho, phir wahin **Deploy** dabate ho. Theek hai.
-
-To masla ye hai: tum ne jo nayi server.js (jisme `-an` audio band, STEP logs the) bheji thi, wo deploy ke baad bhi `ver` `v4.0-map` dikhata hai. Matlab ya to deploy adhura raha, ya purana version wapas aa gaya.
-
-Lekin **asal masla hum pakad chuke hain**: full-height + overlay = **Railway server crash** (memory). Ye "Failed to fetch" 28s baad isi ki nishani hai.
-
-Chalो ek **decisive** kaam karte hain — main poora naya server.js doonga jisme:
-1. Render **kam memory** mein (full-height crash na ho)
-2. Version `v5.0-lowmem` (taake pata chale deploy hua)
-
-Tum Admin app mein **sab purana code delete karke ye paste karo, phir Deploy**:
-
-```javascript
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -30,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v5.0-lowmem', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v5.1-safe', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -87,8 +74,8 @@ app.delete('/api/bunny-delete', (req, res) => {
 });
 
 app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
-  const vf = req.files['video']?.[0]; if (!vf) return res.status(400).json({ error: 'No video' });
-  const of = req.files['overlay']?.[0];
+  const vf = req.files['video'] && req.files['video'][0]; if (!vf) return res.status(400).json({ error: 'No video' });
+  const of = req.files['overlay'] && req.files['overlay'][0];
   let _vfSize=0; try{ _vfSize=fs.statSync(vf.path).size; }catch(e){}
   _lastRenderErr='STEP 1: video='+_vfSize+'b overlay='+(of?'haan':'nahi');
   const ts = Math.max(0, parseFloat(req.body.trimStart)||0);
@@ -98,7 +85,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   const rW = parseInt(req.body.videoW)||720;
   const rH = parseInt(req.body.videoH)||1280;
   const clientPortrait = req.body.isPortrait === '1';
-  const { spawn } = require('child_process');
+  const cp = require('child_process');
+  const spawn = cp.spawn;
   let _rendered = false;
   function doRender(tf, hasAudio) {
     if (_rendered) return; _rendered = true;
@@ -110,9 +98,12 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=' + evW + ':' + evH + '[ov];[base][ov]overlay=0:0[outv]';
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
     const audioArgs = hasAudio ? ['-c:a','aac','-b:a','96k'] : ['-an'];
-    const args = of
-      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-map','0:a?','-c:v','libx264','-preset','ultrafast','-crf','28','-pix_fmt','yuv420p','-threads','1',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','512',out]
-      : ['-y',...trimArgs,'-vf',scaleF,'-pix_fmt','yuv420p','-c:v','libx264','-preset','ultrafast','-crf','28','-threads','1',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','512',out];
+    let args;
+    if (of) {
+      args = ['-y'].concat(trimArgs).concat(['-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-map','0:a?','-c:v','libx264','-preset','ultrafast','-crf','28','-pix_fmt','yuv420p','-threads','1']).concat(audioArgs).concat(['-movflags','+faststart','-max_muxing_queue_size','512',out]);
+    } else {
+      args = ['-y'].concat(trimArgs).concat(['-vf',scaleF,'-pix_fmt','yuv420p','-c:v','libx264','-preset','ultrafast','-crf','28','-threads','1']).concat(audioArgs).concat(['-movflags','+faststart','-max_muxing_queue_size','512',out]);
+    }
     const ff = spawn(FFMPEG_BIN, args);
     _lastRenderErr='STEP 3: ARGS='+args.join(' ');
     let err = '';
@@ -120,7 +111,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     ff.on('close', code => {
       fs.unlink(vf.path, ()=>{});
       if (of) fs.unlink(of.path, ()=>{});
-      if (code !== 0) { _lastRenderErr='EXIT '+code+'\nARGS: '+args.join(' ')+'\n\n'+err; return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-800) }); }
+      if (code !== 0) { _lastRenderErr='EXIT '+code+'\nARGS: '+args.join(' ')+'\n\n'+err; if(!res.headersSent) res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-800) }); return; }
       res.setHeader('Content-Type','video/mp4');
       const s = fs.createReadStream(out);
       s.pipe(res);
@@ -143,10 +134,10 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
       let tf = ''; let hasAudio = false;
       try {
         const info = JSON.parse(probeOut || '{}');
-        const vs = info.streams?.find(s => s.codec_type==='video');
-        const as = info.streams?.find(s => s.codec_type==='audio');
+        const vs = info.streams && info.streams.find(s => s.codec_type==='video');
+        const as = info.streams && info.streams.find(s => s.codec_type==='audio');
         hasAudio = !!as;
-        const rot = Math.abs(parseInt(vs?.tags?.rotate || vs?.side_data_list?.[0]?.rotation || '0'));
+        const rot = Math.abs(parseInt((vs && vs.tags && vs.tags.rotate) || (vs && vs.side_data_list && vs.side_data_list[0] && vs.side_data_list[0].rotation) || '0'));
         if (rot === 90) tf = 'transpose=1,';
         else if (rot === 270) tf = 'transpose=2,';
         if (!tf && clientPortrait && vs) {
@@ -160,20 +151,4 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v5.0-lowmem on port ' + PORT));
-```
-
----
-
-**Kya naya hai (memory bachane ke liye):**
-- `-threads 1` (kam memory)
-- `crf 28` (halka)
-- overlay filter simple (kam memory)
-- audio band agar nahi hai
-
-**Kadam:**
-1. Admin app → server.js → **sab delete** → ye paste → **Deploy**
-2. **4 min ruko**
-3. `/health` kholo → **`v5.0-lowmem`** confirm karo
-
-Bas `/health` ka `ver` batao — `v5.0-lowmem` aaya ya nahi. Phir full-height test karenge. 🔧
+app.listen(PORT, () => console.log('VyralJin Server v5.1-safe on port ' + PORT));

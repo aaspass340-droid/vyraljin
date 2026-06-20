@@ -8,7 +8,6 @@ app.use(express.json({ limit: '50mb' }));
 const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 500 * 1024 * 1024 } });
 app.use(cors());
 
-// ══ KEYS env (Railway locker) se — code mein expose nahi ══
 const BUNNY_KEY = process.env.BUNNY_KEY || '';
 const BUNNY_ZONE = process.env.BUNNY_ZONE || '';
 const BUNNY_PULLZONE = (process.env.BUNNY_PULLZONE || '').replace(/\/$/,'');
@@ -18,14 +17,12 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.2-audiofix', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.4-debug', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
-// ══ Public config — user app ko sirf pullzone + flags milte hain (keys NAHI) ══
-app.get('/api/config', (req, res) => {
-  res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY });
-});
+let _lastRenderErr='(abhi koi error nahi)';
+app.get('/api/lasterror',(req,res)=>res.type('text/plain').send(_lastRenderErr));
 
-// ══ GEMINI hooks — key server par ══
 app.post('/api/gemini', async (req, res) => {
   if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });
   const prompt = req.body.prompt || '';
@@ -49,14 +46,12 @@ app.post('/api/gemini', async (req, res) => {
   res.status(500).json({ error: 'Gemini failed' });
 });
 
-// ══ BUNNY list — key server par ══
 app.get('/api/bunny-list', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
   const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/',method:'GET',headers:{'AccessKey':BUNNY_KEY,'Accept':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
-// ══ BUNNY upload — key server par (user app ko key na chahiye) ══
 app.post('/api/bunny-upload', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
   const file = req.query.file;
@@ -70,7 +65,6 @@ app.post('/api/bunny-upload', (req, res) => {
   });
 });
 
-// ══ BUNNY delete — key server par ══
 app.delete('/api/bunny-delete', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
   const file = req.query.file;
@@ -79,15 +73,12 @@ app.delete('/api/bunny-delete', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
-// ══ RENDER (FFmpeg overlay) — badi video ke liye optimized ══
 app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
   const vf = req.files['video']?.[0]; if (!vf) return res.status(400).json({ error: 'No video' });
   const of = req.files['overlay']?.[0];
-  // 🔬 File sahi pohanchi? size + path check
   let _vfSize=0;
-  try{ _vfSize=require('fs').statSync(vf.path).size; }catch(e){}
-  console.log('VIDEO received:', vf.originalname, 'size:', _vfSize, 'path:', vf.path);
-  if(_vfSize<1000){ return res.status(500).json({ error: 'FFmpeg failed', detail: 'Video file empty ya adhuri pohanchi ('+_vfSize+' bytes) — upload masla' }); }
+  try{ _vfSize=fs.statSync(vf.path).size; }catch(e){}
+  console.log('VIDEO received size:', _vfSize);
   const ts = Math.max(0, parseFloat(req.body.trimStart)||0);
   const te = parseFloat(req.body.trimEnd)||0;
   const dur = te > ts ? te - ts : 0;
@@ -104,43 +95,38 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const evH = rH % 2 === 0 ? rH : rH + 1;
     const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
     const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p';
-    // Badi video: -ss INPUT ke BAAD (output seek) = reliable, frame 0 crash nahi.
-    // +genpts timestamps fix karta hai (badi video ke broken pts ka hal)
-    const trimArgs = dur > 0.5
-      ? ['-fflags','+genpts','-i', vf.path, '-ss', String(ts), '-t', String(dur)]
-      : ['-fflags','+genpts','-i', vf.path];
-    // 🔬 TEST: audio poori tarah band — pata karne ke liye masla audio mein hai ya nahi
-    const audioArgs = ['-an'];
-    // 🔬 TEST 2: scale bhi hata — sabse simple (sirf trim + encode), pata karne ke liye masla scale mein hai ya video input mein
-    const args = ['-y',...trimArgs,'-vf','scale=trunc(iw/2)*2:trunc(ih/2)*2','-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart',out];
+    const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
+    const audioArgs = hasAudio ? ['-c:a','aac','-b:a','128k'] : ['-an'];
+    const args = of
+      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out]
+      : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });
     ff.on('close', code => {
       fs.unlink(vf.path, ()=>{});
       if (of) fs.unlink(of.path, ()=>{});
-      if (code !== 0) { _lastRenderErr='EXIT '+code+'\n\n'+err; return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-1500) }); }
+      if (code !== 0) { _lastRenderErr='EXIT '+code+' | size:'+_vfSize+'\n\nARGS: '+args.join(' ')+'\n\n'+err; return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-1500) }); }
       res.setHeader('Content-Type','video/mp4');
       const s = fs.createReadStream(out);
       s.pipe(res);
       s.on('end', () => fs.unlink(out, ()=>{}));
       s.on('error', () => fs.unlink(out, ()=>{}));
     });
-    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) res.status(500).json({ error: 'Timeout' }); }, 280000);
+    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) { _lastRenderErr='TIMEOUT 280s | size:'+_vfSize; res.status(500).json({ error: 'Timeout' }); } }, 280000);
   }
   let FFPROBE_BIN = 'ffprobe';
   try { const s = require('ffprobe-static'); if(s && s.path) FFPROBE_BIN = s.path; } catch(e) {}
-  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', false); }, 8000);
+  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', true); }, 8000);
   try {
     const probe = spawn(FFPROBE_BIN, ['-v','quiet','-print_format','json','-show_streams',vf.path]);
     let probeOut = '';
     probe.stdout.on('data', d => probeOut += d);
     probe.stderr.on('data', ()=>{});
-    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); });
+    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', true); });
     probe.on('close', () => {
       clearTimeout(fbTimer);
-      let tf = '';
-      let hasAudio = false;
+      let tf = ''; let hasAudio = false;
       try {
         const info = JSON.parse(probeOut || '{}');
         const vs = info.streams?.find(s => s.codec_type==='video');
@@ -156,11 +142,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
       } catch(e) {}
       doRender(tf, hasAudio);
     });
-  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); }
+  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', true); }
 });
 
-// 🔬 Last render error yaad rakho — browser se dekhne ke liye
-let _lastRenderErr='(abhi koi error nahi)';
-app.get('/api/lasterror',(req,res)=>res.type('text/plain').send(_lastRenderErr));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v3.1 (optimized) on port ' + PORT));
+app.listen(PORT, () => console.log('VyralJin Server v3.4-debug on port ' + PORT));

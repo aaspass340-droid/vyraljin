@@ -99,7 +99,11 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const evH = rH % 2 === 0 ? rH : rH + 1;
     const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
     const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p';
-    const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
+    // Badi video: -ss INPUT ke BAAD (output seek) = reliable, frame 0 crash nahi.
+    // +genpts timestamps fix karta hai (badi video ke broken pts ka hal)
+    const trimArgs = dur > 0.5
+      ? ['-fflags','+genpts','-i', vf.path, '-ss', String(ts), '-t', String(dur)]
+      : ['-fflags','+genpts','-i', vf.path];
     // 🔬 TEST: audio poori tarah band — pata karne ke liye masla audio mein hai ya nahi
     const audioArgs = ['-an'];
     // 🔬 TEST 2: scale bhi hata — sabse simple (sirf trim + encode), pata karne ke liye masla scale mein hai ya video input mein

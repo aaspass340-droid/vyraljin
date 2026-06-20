@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.6-steps', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.7-step0', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -73,8 +73,9 @@ app.delete('/api/bunny-delete', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
-app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
-  const vf = req.files['video']?.[0]; if (!vf) return res.status(400).json({ error: 'No video' });
+app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render request aayi! '+new Date().toISOString(); next(); }, upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
+  _lastRenderErr='STEP 0.5: multer ke baad, files='+JSON.stringify(Object.keys(req.files||{}));
+  const vf = req.files['video']?.[0]; if (!vf) { _lastRenderErr='STEP 0.6: VIDEO FILE NAHI MILI multer ke baad'; return res.status(400).json({ error: 'No video' }); }
   const of = req.files['overlay']?.[0];
   let _vfSize=0;
   try{ _vfSize=fs.statSync(vf.path).size; }catch(e){}

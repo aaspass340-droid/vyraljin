@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.7-step0', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.8-overlayfix', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -97,7 +97,8 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
     const evW = rW % 2 === 0 ? rW : rW + 1;
     const evH = rH % 2 === 0 ? rH : rH + 1;
     const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
-    const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p';
+    // Overlay PNG ko loop+format karo taake video ke har frame par lage (dup=4 frame=0 crash ka hal)
+    const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[base];[1:v]scale=' + evW + ':' + evH + ',format=rgba[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:eof_action=repeat:format=auto,format=yuv420p';
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
     // 🔬 Audio poori tarah band — video (audio wali) test
     const audioArgs = ['-an'];

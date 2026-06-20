@@ -102,9 +102,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
     // 🔬 TEST: audio poori tarah band — pata karne ke liye masla audio mein hai ya nahi
     const audioArgs = ['-an'];
-    const args = of
-      ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out]
-      : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
+    // 🔬 TEST: overlay IGNORE — sirf scale (pata karne ke liye masla overlay mein hai ya nahi)
+    const args = ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });

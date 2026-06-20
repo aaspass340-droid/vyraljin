@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.5-noaudio', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.6-steps', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -79,6 +79,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   let _vfSize=0;
   try{ _vfSize=fs.statSync(vf.path).size; }catch(e){}
   console.log('VIDEO received size:', _vfSize);
+  _lastRenderErr='STEP 1: video mila, size='+_vfSize+' bytes, overlay='+(of?'haan':'nahi');
   const ts = Math.max(0, parseFloat(req.body.trimStart)||0);
   const te = parseFloat(req.body.trimEnd)||0;
   const dur = te > ts ? te - ts : 0;
@@ -91,6 +92,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   function doRender(tf, hasAudio) {
     if (_rendered) return; _rendered = true;
     tf = tf || '';
+    _lastRenderErr='STEP 2: doRender shuru, tf='+tf+', size='+_vfSize;
     const evW = rW % 2 === 0 ? rW : rW + 1;
     const evH = rH % 2 === 0 ? rH : rH + 1;
     const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
@@ -102,8 +104,9 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
       ? ['-y',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out]
       : ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
+    _lastRenderErr='STEP 3: FFmpeg spawn hua, ARGS='+args.join(' ');
     let err = '';
-    ff.stderr.on('data', d => { err += d.toString(); });
+    ff.stderr.on('data', d => { err += d.toString(); _lastRenderErr='STEP 4: FFmpeg chal raha\n\n'+err.slice(-1500); });
     ff.on('close', code => {
       fs.unlink(vf.path, ()=>{});
       if (of) fs.unlink(of.path, ()=>{});

@@ -17,11 +17,19 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.8-overlayfix', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v3.9-uptest', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
 app.get('/api/lasterror',(req,res)=>res.type('text/plain').send(_lastRenderErr));
+// 🔬 TEST: sirf video receive karo, render NAHI — pata karne ke liye upload pohanchti hai ya nahi
+app.post('/api/uptest', upload.fields([{name:'video',maxCount:1}]), (req,res)=>{
+  const vf=req.files['video']?.[0];
+  let sz=0; try{sz=fs.statSync(vf.path).size;}catch(e){}
+  if(vf)fs.unlink(vf.path,()=>{});
+  _lastRenderErr='UPTEST: video mili! size='+sz+' bytes, time='+new Date().toISOString();
+  res.json({ok:true,size:sz});
+});
 
 app.post('/api/gemini', async (req, res) => {
   if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });

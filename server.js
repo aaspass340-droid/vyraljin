@@ -83,6 +83,11 @@ app.delete('/api/bunny-delete', (req, res) => {
 app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
   const vf = req.files['video']?.[0]; if (!vf) return res.status(400).json({ error: 'No video' });
   const of = req.files['overlay']?.[0];
+  // 🔬 File sahi pohanchi? size + path check
+  let _vfSize=0;
+  try{ _vfSize=require('fs').statSync(vf.path).size; }catch(e){}
+  console.log('VIDEO received:', vf.originalname, 'size:', _vfSize, 'path:', vf.path);
+  if(_vfSize<1000){ return res.status(500).json({ error: 'FFmpeg failed', detail: 'Video file empty ya adhuri pohanchi ('+_vfSize+' bytes) — upload masla' }); }
   const ts = Math.max(0, parseFloat(req.body.trimStart)||0);
   const te = parseFloat(req.body.trimEnd)||0;
   const dur = te > ts ? te - ts : 0;
@@ -114,7 +119,7 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     ff.on('close', code => {
       fs.unlink(vf.path, ()=>{});
       if (of) fs.unlink(of.path, ()=>{});
-      if (code !== 0) return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-1500) });
+      if (code !== 0) { _lastRenderErr='EXIT '+code+'\n\n'+err; return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-1500) }); }
       res.setHeader('Content-Type','video/mp4');
       const s = fs.createReadStream(out);
       s.pipe(res);
@@ -154,5 +159,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
   } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); }
 });
 
+// 🔬 Last render error yaad rakho — browser se dekhne ke liye
+let _lastRenderErr='(abhi koi error nahi)';
+app.get('/api/lasterror',(req,res)=>res.type('text/plain').send(_lastRenderErr));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('VyralJin Server v3.1 (optimized) on port ' + PORT));

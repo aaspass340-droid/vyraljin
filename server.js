@@ -127,11 +127,11 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
       s.on('end', () => fs.unlink(out, ()=>{}));
       s.on('error', () => fs.unlink(out, ()=>{}));
     });
-    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) { _lastRenderErr='TIMEOUT 280s | size:'+_vfSize; res.status(500).json({ error: 'Timeout' }); } }, 280000);
+    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) { _lastRenderErr='TIMEOUT 900s | size:'+_vfSize; res.status(500).json({ error: 'Timeout' }); } }, 900000);
   }
   let FFPROBE_BIN = 'ffprobe';
   try { const s = require('ffprobe-static'); if(s && s.path) FFPROBE_BIN = s.path; } catch(e) {}
-  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', true); }, 8000);
+  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', true); }, 15000);
   try {
     const probe = spawn(FFPROBE_BIN, ['-v','quiet','-print_format','json','-show_streams',vf.path]);
     let probeOut = '';

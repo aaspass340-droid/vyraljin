@@ -102,8 +102,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-ss', String(ts), '-i', vf.path];
     // 🔬 TEST: audio poori tarah band — pata karne ke liye masla audio mein hai ya nahi
     const audioArgs = ['-an'];
-    // 🔬 TEST: overlay IGNORE — sirf scale (pata karne ke liye masla overlay mein hai ya nahi)
-    const args = ['-y',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
+    // 🔬 TEST 2: scale bhi hata — sabse simple (sirf trim + encode), pata karne ke liye masla scale mein hai ya video input mein
+    const args = ['-y',...trimArgs,'-vf','scale=trunc(iw/2)*2:trunc(ih/2)*2','-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart',out];
     const ff = spawn(FFMPEG_BIN, args);
     let err = '';
     ff.stderr.on('data', d => { err += d.toString(); });

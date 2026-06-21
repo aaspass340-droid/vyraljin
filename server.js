@@ -17,11 +17,19 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v5.1-safe', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v5.0-lowmem', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
 app.get('/api/lasterror',(req,res)=>res.type('text/plain').send(_lastRenderErr));
+// 🔬 TEST: sirf video receive karo, render NAHI — pata karne ke liye upload pohanchti hai ya nahi
+app.post('/api/uptest', upload.fields([{name:'video',maxCount:1}]), (req,res)=>{
+  const vf=req.files['video']?.[0];
+  let sz=0; try{sz=fs.statSync(vf.path).size;}catch(e){}
+  if(vf)fs.unlink(vf.path,()=>{});
+  _lastRenderErr='UPTEST: video mili! size='+sz+' bytes, time='+new Date().toISOString();
+  res.json({ok:true,size:sz});
+});
 
 app.post('/api/gemini', async (req, res) => {
   if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });
@@ -73,71 +81,73 @@ app.delete('/api/bunny-delete', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
-app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
-  const vf = req.files['video'] && req.files['video'][0]; if (!vf) return res.status(400).json({ error: 'No video' });
-  const of = req.files['overlay'] && req.files['overlay'][0];
-  let _vfSize=0; try{ _vfSize=fs.statSync(vf.path).size; }catch(e){}
-  _lastRenderErr='STEP 1: video='+_vfSize+'b overlay='+(of?'haan':'nahi');
+app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render request aayi! '+new Date().toISOString(); next(); }, upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
+  _lastRenderErr='STEP 0.5: multer ke baad, files='+JSON.stringify(Object.keys(req.files||{}));
+  const vf = req.files['video']?.[0]; if (!vf) { _lastRenderErr='STEP 0.6: VIDEO FILE NAHI MILI multer ke baad'; return res.status(400).json({ error: 'No video' }); }
+  const of = req.files['overlay']?.[0];
+  let _vfSize=0;
+  try{ _vfSize=fs.statSync(vf.path).size; }catch(e){}
+  console.log('VIDEO received size:', _vfSize);
+  _lastRenderErr='STEP 1: video mila, size='+_vfSize+' bytes, overlay='+(of?'haan':'nahi');
   const ts = Math.max(0, parseFloat(req.body.trimStart)||0);
   const te = parseFloat(req.body.trimEnd)||0;
   const dur = te > ts ? te - ts : 0;
   const out = '/tmp/final_' + Date.now() + '.mp4';
-  const rW = parseInt(req.body.videoW)||720;
-  const rH = parseInt(req.body.videoH)||1280;
+  const rW = parseInt(req.body.videoW)||1080;
+  const rH = parseInt(req.body.videoH)||1920;
   const clientPortrait = req.body.isPortrait === '1';
-  const cp = require('child_process');
-  const spawn = cp.spawn;
+  const { spawn } = require('child_process');
   let _rendered = false;
   function doRender(tf, hasAudio) {
     if (_rendered) return; _rendered = true;
     tf = tf || '';
+    _lastRenderErr='STEP 2: doRender shuru, tf='+tf+', size='+_vfSize;
     const evW = rW % 2 === 0 ? rW : rW + 1;
     const evH = rH % 2 === 0 ? rH : rH + 1;
-    _lastRenderErr='STEP 2: render '+evW+'x'+evH+' audio='+hasAudio;
-    const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1';
-    const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=' + evW + ':' + evH + '[ov];[base][ov]overlay=0:0[outv]';
+    const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
+    // Overlay simple + reliable: base video scale, phir overlay ko base ke size par, overlay
+    const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,setsar=1[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto[outv]';
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
-    const audioArgs = hasAudio ? ['-c:a','aac','-b:a','96k'] : ['-an'];
-    let args;
-    if (of) {
-      args = ['-y'].concat(trimArgs).concat(['-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-map','0:a?','-c:v','libx264','-preset','ultrafast','-crf','28','-pix_fmt','yuv420p','-threads','1']).concat(audioArgs).concat(['-movflags','+faststart','-max_muxing_queue_size','512',out]);
-    } else {
-      args = ['-y'].concat(trimArgs).concat(['-vf',scaleF,'-pix_fmt','yuv420p','-c:v','libx264','-preset','ultrafast','-crf','28','-threads','1']).concat(audioArgs).concat(['-movflags','+faststart','-max_muxing_queue_size','512',out]);
-    }
+    // 🔬 Audio poori tarah band — video (audio wali) test
+    const audioArgs = ['-an'];
+    const noAudioMap = audioArgs.length > 0;
+    const args = of
+      ? ['-y','-filter_complex_threads','1',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-c:v','libx264','-preset','ultrafast','-threads','1','-crf','26','-pix_fmt','yuv420p','-an','-movflags','+faststart','-max_muxing_queue_size','1024',out]
+      : ['-y','-filter_threads','1',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-threads','1','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
-    _lastRenderErr='STEP 3: ARGS='+args.join(' ');
+    _lastRenderErr='STEP 3: FFmpeg spawn hua, ARGS='+args.join(' ');
     let err = '';
-    ff.stderr.on('data', d => { err += d.toString(); _lastRenderErr='STEP 4:\n\n'+err.slice(-1800); });
+    ff.stderr.on('data', d => { err += d.toString(); _lastRenderErr='STEP 4: FFmpeg chal raha\n\n'+err.slice(-1500); });
     ff.on('close', code => {
       fs.unlink(vf.path, ()=>{});
       if (of) fs.unlink(of.path, ()=>{});
-      if (code !== 0) { _lastRenderErr='EXIT '+code+'\nARGS: '+args.join(' ')+'\n\n'+err; if(!res.headersSent) res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-800) }); return; }
+      if (code !== 0) { _lastRenderErr='EXIT '+code+' | size:'+_vfSize+'\n\nARGS: '+args.join(' ')+'\n\n'+err; return res.status(500).json({ error: 'FFmpeg failed', detail: err.slice(-1500) }); }
       res.setHeader('Content-Type','video/mp4');
       const s = fs.createReadStream(out);
       s.pipe(res);
       s.on('end', () => fs.unlink(out, ()=>{}));
       s.on('error', () => fs.unlink(out, ()=>{}));
     });
-    setTimeout(() => { try{ff.kill('SIGKILL');}catch(e){} if (!res.headersSent) { _lastRenderErr='TIMEOUT'; res.status(500).json({ error: 'Timeout' }); } }, 270000);
+    setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) { _lastRenderErr='TIMEOUT 900s | size:'+_vfSize; res.status(500).json({ error: 'Timeout' }); } }, 900000);
   }
   let FFPROBE_BIN = 'ffprobe';
   try { const s = require('ffprobe-static'); if(s && s.path) FFPROBE_BIN = s.path; } catch(e) {}
-  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', false); }, 10000);
+  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', true); }, 15000);
   try {
     const probe = spawn(FFPROBE_BIN, ['-v','quiet','-print_format','json','-show_streams',vf.path]);
     let probeOut = '';
     probe.stdout.on('data', d => probeOut += d);
     probe.stderr.on('data', ()=>{});
-    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); });
+    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', true); });
     probe.on('close', () => {
       clearTimeout(fbTimer);
       let tf = ''; let hasAudio = false;
       try {
         const info = JSON.parse(probeOut || '{}');
-        const vs = info.streams && info.streams.find(s => s.codec_type==='video');
-        const as = info.streams && info.streams.find(s => s.codec_type==='audio');
+        const vs = info.streams?.find(s => s.codec_type==='video');
+        const as = info.streams?.find(s => s.codec_type==='audio');
         hasAudio = !!as;
-        const rot = Math.abs(parseInt((vs && vs.tags && vs.tags.rotate) || (vs && vs.side_data_list && vs.side_data_list[0] && vs.side_data_list[0].rotation) || '0'));
+        const rot = Math.abs(parseInt(vs?.tags?.rotate || vs?.side_data_list?.[0]?.rotation || '0'));
         if (rot === 90) tf = 'transpose=1,';
         else if (rot === 270) tf = 'transpose=2,';
         if (!tf && clientPortrait && vs) {
@@ -147,8 +157,8 @@ app.post('/api/render', upload.fields([{name:'video',maxCount:1},{name:'overlay'
       } catch(e) {}
       doRender(tf, hasAudio);
     });
-  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', false); }
+  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', true); }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v5.1-safe on port ' + PORT));
+app.listen(PORT, () => console.log('VyralJin Server v3.4-debug on port ' + PORT));

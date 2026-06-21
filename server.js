@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v6.0-autorotate', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v7.0-noscale', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -93,27 +93,20 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
   const te = parseFloat(req.body.trimEnd)||0;
   const dur = te > ts ? te - ts : 0;
   const out = '/tmp/final_' + Date.now() + '.mp4';
-  const rW = parseInt(req.body.videoW)||1080;
-  const rH = parseInt(req.body.videoH)||1920;
-  const clientPortrait = req.body.isPortrait === '1';
   const { spawn } = require('child_process');
   let _rendered = false;
-  function doRender(tf, hasAudio) {
+  function doRender() {
     if (_rendered) return; _rendered = true;
-    tf = tf || '';
-    _lastRenderErr='STEP 2: doRender shuru, tf='+tf+', size='+_vfSize;
-    const evW = rW % 2 === 0 ? rW : rW + 1;
-    const evH = rH % 2 === 0 ? rH : rH + 1;
-    const scaleF = tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p';
-    // Overlay simple + reliable: base video scale, phir overlay ko base ke size par, overlay
-    const fcOv = '[0:v]' + tf + 'scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,pad=' + evW + ':' + evH + ':(ow-iw)/2:(oh-ih)/2,setsar=1[base];[1:v]scale=' + evW + ':' + evH + ':force_original_aspect_ratio=decrease,setsar=1[ov];[base][ov]overlay=(W-w)/2:(H-h)/2:format=auto[outv]';
+    _lastRenderErr='STEP 2: doRender shuru, size='+_vfSize;
+    // ASLI SHAPE: video ke original dimensions hi rakho — na scale, na crop, na pad.
+    // Sirf width/height ko even (2 ka multiple) karo, kyunke libx264 ko even chahiye.
+    const scaleF = 'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p';
+    // Overlay ko video ke asli size par fit karo (scale2ref) — phir bilkul upar overlay.
+    const fcOv = '[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base];[1:v][base]scale2ref=w=iw:h=ih[ov][base2];[base2][ov]overlay=0:0:format=auto[outv]';
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
-    // 🔬 Audio poori tarah band — video (audio wali) test
-    const audioArgs = ['-an'];
-    const noAudioMap = audioArgs.length > 0;
     const args = of
       ? ['-y','-filter_complex_threads','1',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-c:v','libx264','-preset','ultrafast','-threads','1','-crf','26','-pix_fmt','yuv420p','-an','-movflags','+faststart','-max_muxing_queue_size','1024',out]
-      : ['-y','-filter_threads','1',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-threads','1','-crf','26','-pix_fmt','yuv420p',...audioArgs,'-movflags','+faststart','-max_muxing_queue_size','1024',out];
+      : ['-y','-filter_threads','1',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-threads','1','-crf','26','-pix_fmt','yuv420p','-an','-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     _lastRenderErr='STEP 3: FFmpeg spawn hua, ARGS='+args.join(' ');
     let err = '';
@@ -130,10 +123,9 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
     });
     setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) { _lastRenderErr='TIMEOUT 900s | size:'+_vfSize; res.status(500).json({ error: 'Timeout' }); } }, 900000);
   }
-  // AUTO-ROTATE: FFmpeg khud video ki rotation metadata padh ke sahi seedha kar leta hai.
-  // Isliye yahan manual transpose bilkul nahi lagana — warna mobile 9:16 video double-rotate ho jati hai.
-  doRender('', true);
+  // AUTO-ROTATE: FFmpeg khud rotation metadata padh ke seedha kar leta hai — manual transpose nahi.
+  doRender();
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v6.0-autorotate on port ' + PORT));
+app.listen(PORT, () => console.log('VyralJin Server v7.0-noscale on port ' + PORT));

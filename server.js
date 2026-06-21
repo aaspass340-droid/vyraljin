@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v5.0-lowmem', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v6.0-autorotate', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -130,35 +130,10 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
     });
     setTimeout(() => { ff.kill('SIGKILL'); if (!res.headersSent) { _lastRenderErr='TIMEOUT 900s | size:'+_vfSize; res.status(500).json({ error: 'Timeout' }); } }, 900000);
   }
-  let FFPROBE_BIN = 'ffprobe';
-  try { const s = require('ffprobe-static'); if(s && s.path) FFPROBE_BIN = s.path; } catch(e) {}
-  const fbTimer = setTimeout(() => { doRender(clientPortrait ? 'transpose=1,' : '', true); }, 15000);
-  try {
-    const probe = spawn(FFPROBE_BIN, ['-v','quiet','-print_format','json','-show_streams',vf.path]);
-    let probeOut = '';
-    probe.stdout.on('data', d => probeOut += d);
-    probe.stderr.on('data', ()=>{});
-    probe.on('error', () => { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', true); });
-    probe.on('close', () => {
-      clearTimeout(fbTimer);
-      let tf = ''; let hasAudio = false;
-      try {
-        const info = JSON.parse(probeOut || '{}');
-        const vs = info.streams?.find(s => s.codec_type==='video');
-        const as = info.streams?.find(s => s.codec_type==='audio');
-        hasAudio = !!as;
-        const rot = Math.abs(parseInt(vs?.tags?.rotate || vs?.side_data_list?.[0]?.rotation || '0'));
-        if (rot === 90) tf = 'transpose=1,';
-        else if (rot === 270) tf = 'transpose=2,';
-        if (!tf && clientPortrait && vs) {
-          const rawW = parseInt(vs.width)||0; const rawH = parseInt(vs.height)||0;
-          if (rawW > rawH) tf = 'transpose=1,';
-        }
-      } catch(e) {}
-      doRender(tf, hasAudio);
-    });
-  } catch(e) { clearTimeout(fbTimer); doRender(clientPortrait ? 'transpose=1,' : '', true); }
+  // AUTO-ROTATE: FFmpeg khud video ki rotation metadata padh ke sahi seedha kar leta hai.
+  // Isliye yahan manual transpose bilkul nahi lagana — warna mobile 9:16 video double-rotate ho jati hai.
+  doRender('', true);
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('VyralJin Server v3.4-debug on port ' + PORT));
+app.listen(PORT, () => console.log('VyralJin Server v6.0-autorotate on port ' + PORT));

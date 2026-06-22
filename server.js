@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v9.2-stable', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v9.3-fullvideo', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -99,10 +99,10 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
     if (_rendered) return; _rendered = true;
     _lastRenderErr='STEP 2: doRender shuru, size='+_vfSize;
     // ASLI SHAPE: video ke original dimensions hi rakho — na scale, na crop, na pad.
-    // Sirf width/height ko even (2 ka multiple) karo, kyunke libx264 ko even chahiye.
     const scaleF = 'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,format=yuv420p';
-    // Overlay ko video ke asli size par fit karo (scale2ref) — phir bilkul upar overlay.
-    const fcOv = '[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base];[1:v][base]scale2ref=w=iw:h=ih[ov][base2];[base2][ov]overlay=0:0:format=auto[outv]';
+    // Overlay PNG ko base video ke size par scale karke poori video par overlay karo.
+    // [base] pehle banao, phir overlay ko uske size par, phir overlay — taake video poori chale.
+    const fcOv = '[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base];[base][1:v]scale2ref=w=main_w:h=main_h[base2][ov];[base2][ov]overlay=0:0:format=auto[outv]';
     const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
     const args = of
       ? ['-y','-filter_complex_threads','1',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-c:v','libx264','-preset','ultrafast','-threads','1','-crf','23','-pix_fmt','yuv420p','-an','-movflags','+faststart','-max_muxing_queue_size','1024',out]

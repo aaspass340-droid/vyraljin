@@ -17,7 +17,7 @@ let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
-app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v9.6-image', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
+app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v9.7-clean', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
 let _lastRenderErr='(abhi koi error nahi)';
@@ -92,9 +92,6 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
   const ts = Math.max(0, parseFloat(req.body.trimStart)||0);
   const te = parseFloat(req.body.trimEnd)||0;
   const dur = te > ts ? te - ts : 0;
-  // PICTURE MODE: client isImage=1 bheje to input image hai — 5 sec ki video banao
-  const isImage = req.body.isImage === '1';
-  const imgDur = 5;
   const out = '/tmp/final_' + Date.now() + '.mp4';
   const { spawn } = require('child_process');
   let _rendered = false;
@@ -106,15 +103,9 @@ app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render re
     // Overlay PNG ko video ke har frame par overlay karo. eof_action=repeat se overlay
     // poori video par rehta hai aur video poori length chalti hai (1 frame nahi).
     const fcOv = '[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base];[1:v]scale=trunc(iw/2)*2:trunc(ih/2)*2[ov];[base][ov]overlay=0:0:eof_action=repeat:format=auto[outv]';
-    // Image mode: -loop 1 + -t se image ko 5 sec video banao (audio nahi). Video mode pehle jaisa.
-    const trimArgs = isImage
-      ? ['-loop','1','-t',String(imgDur),'-i',vf.path]
-      : (dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path]);
-    const ovInput = isImage ? ['-loop','1','-t',String(imgDur),'-i',of.path] : ['-i',of.path];
+    const trimArgs = dur > 0.5 ? ['-ss', String(ts), '-i', vf.path, '-t', String(dur)] : ['-i', vf.path];
     const args = of
-      ? (isImage
-        ? ['-y','-filter_complex_threads','1',...trimArgs,...ovInput,'-filter_complex',fcOv,'-map','[outv]','-c:v','libx264','-preset','ultrafast','-threads','1','-crf','23','-pix_fmt','yuv420p','-movflags','+faststart','-max_muxing_queue_size','1024',out]
-        : ['-y','-filter_complex_threads','1',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-map','0:a?','-c:v','libx264','-preset','ultrafast','-threads','1','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out])
+      ? ['-y','-filter_complex_threads','1',...trimArgs,'-i',of.path,'-filter_complex',fcOv,'-map','[outv]','-map','0:a?','-c:v','libx264','-preset','ultrafast','-threads','1','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out]
       : ['-y','-filter_threads','1',...trimArgs,'-vf',scaleF,'-c:v','libx264','-preset','ultrafast','-threads','1','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','-max_muxing_queue_size','1024',out];
     const ff = spawn(FFMPEG_BIN, args);
     _lastRenderErr='STEP 3: FFmpeg spawn hua, ARGS='+args.join(' ');

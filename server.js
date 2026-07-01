@@ -16,9 +16,54 @@ const GEMINI_KEY = process.env.GEMINI_KEY || '';
 let FFMPEG_BIN = 'ffmpeg';
 try { const s = require('ffmpeg-static'); if (s) FFMPEG_BIN = s; } catch(e) {}
 
+let shareCounts = {};
+const SHARECOUNTS_FILE = 'vj_sharecounts.json';
+let _scSaveTimer = null;
+
+function bunnyGetJSON(filename) {
+  return new Promise((resolve) => {
+    if (!BUNNY_KEY || !BUNNY_ZONE) return resolve(null);
+    const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(filename),method:'GET',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{
+      let d=''; resp.on('data',c=>d+=c); resp.on('end',()=>{
+        if(resp.statusCode!==200) return resolve(null);
+        try{ resolve(JSON.parse(d)); }catch(e){ resolve(null); }
+      });
+    });
+    r.on('error',()=>resolve(null)); r.end();
+  });
+}
+function bunnyPutJSON(filename, data) {
+  return new Promise((resolve) => {
+    if (!BUNNY_KEY || !BUNNY_ZONE) return resolve(false);
+    const body = Buffer.from(JSON.stringify(data));
+    const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(filename),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'application/json','Content-Length':body.length}},(resp)=>{
+      resp.on('data',()=>{}); resp.on('end',()=>resolve(resp.statusCode<300));
+    });
+    r.on('error',()=>resolve(false)); r.write(body); r.end();
+  });
+}
+bunnyGetJSON(SHARECOUNTS_FILE).then(data=>{ if(data && typeof data==='object') shareCounts = data; }).catch(()=>{});
+
+function saveShareCountsDebounced(){
+  if(_scSaveTimer) clearTimeout(_scSaveTimer);
+  _scSaveTimer = setTimeout(()=>{ bunnyPutJSON(SHARECOUNTS_FILE, shareCounts).catch(()=>{}); }, 3000);
+}
+
 app.get('/', (req, res) => res.send('VyralJin Server OK'));
 app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v9.7-clean', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
+
+app.post('/api/mark-shared', (req, res) => {
+  const videoURL = req.body && req.body.videoURL;
+  if (!videoURL) return res.status(400).json({ error: 'No videoURL' });
+  shareCounts[videoURL] = (shareCounts[videoURL] || 0) + 1;
+  saveShareCountsDebounced();
+  res.json({ ok: true, count: shareCounts[videoURL] });
+});
+
+app.get('/api/share-counts', (req, res) => {
+  res.json(shareCounts);
+});
 
 let _lastRenderErr='(abhi koi error nahi)';
 app.get('/api/lasterror',(req,res)=>res.type('text/plain').send(_lastRenderErr));

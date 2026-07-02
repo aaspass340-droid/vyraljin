@@ -23,7 +23,7 @@ let _scSaveTimer = null;
 function bunnyGetJSON(filename) {
   return new Promise((resolve) => {
     if (!BUNNY_KEY || !BUNNY_ZONE) return resolve(null);
-    const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(filename),method:'GET',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{
+    const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(filename),method:'GET',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{
       let d=''; resp.on('data',c=>d+=c); resp.on('end',()=>{
         if(resp.statusCode!==200) return resolve(null);
         try{ resolve(JSON.parse(d)); }catch(e){ resolve(null); }
@@ -36,7 +36,7 @@ function bunnyPutJSON(filename, data) {
   return new Promise((resolve) => {
     if (!BUNNY_KEY || !BUNNY_ZONE) return resolve(false);
     const body = Buffer.from(JSON.stringify(data));
-    const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(filename),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'application/json','Content-Length':body.length}},(resp)=>{
+    const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(filename),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'application/json','Content-Length':body.length}},(resp)=>{
       resp.on('data',()=>{}); resp.on('end',()=>resolve(resp.statusCode<300));
     });
     r.on('error',()=>resolve(false)); r.write(body); r.end();
@@ -101,7 +101,7 @@ app.post('/api/gemini', async (req, res) => {
 
 app.get('/api/bunny-list', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
-  const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/',method:'GET',headers:{'AccessKey':BUNNY_KEY,'Accept':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});
+  const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/',method:'GET',headers:{'AccessKey':BUNNY_KEY,'Accept':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
@@ -113,7 +113,7 @@ app.post('/api/bunny-upload', (req, res) => {
   req.on('data', c => chunks.push(c));
   req.on('end', () => {
     const bodyBuf = Buffer.concat(chunks);
-    const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(file),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'video/mp4','Content-Length':bodyBuf.length}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300,url:BUNNY_PULLZONE+'/'+file}));});
+    const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(file),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'video/mp4','Content-Length':bodyBuf.length}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300,url:BUNNY_PULLZONE+'/'+file}));});
     r.on('error',e=>res.status(500).json({error:e.message})); r.write(bodyBuf); r.end();
   });
 });
@@ -122,7 +122,7 @@ app.delete('/api/bunny-delete', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
   const file = req.query.file;
   if (!file) return res.status(400).json({ error: 'No filename' });
-  const r = https.request({hostname:'sg.storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+decodeURIComponent(file),method:'DELETE',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300}));});
+  const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+decodeURIComponent(file),method:'DELETE',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300}));});
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 

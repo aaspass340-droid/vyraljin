@@ -126,6 +126,22 @@ app.delete('/api/bunny-delete', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
+app.get('/api/bunny-billing', (req, res) => {
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: 'No account key' });
+  const r = https.request({hostname:'api.bunny.net',path:'/billing/summary',method:'GET',headers:{'AccessKey':key,'Accept':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});
+  r.on('error',e=>res.status(500).json({error:e.message})); r.end();
+});
+
+app.post('/api/railway-usage', (req, res) => {
+  const token = req.query.token;
+  const { query, variables } = req.body || {};
+  if (!token || !query) return res.status(400).json({ error: 'Missing token/query' });
+  const body = JSON.stringify({ query, variables: variables || {} });
+  const r = https.request({hostname:'backboard.railway.com',path:'/graphql/v2',method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>{try{res.json(JSON.parse(d));}catch(e){res.status(500).json({error:'Parse error'})}});});
+  r.on('error',e=>res.status(500).json({error:e.message})); r.write(body); r.end();
+});
+
 app.post('/api/render', (req,res,next)=>{ _lastRenderErr='STEP 0: /api/render request aayi! '+new Date().toISOString(); next(); }, upload.fields([{name:'video',maxCount:1},{name:'overlay',maxCount:1}]), (req, res) => {
   _lastRenderErr='STEP 0.5: multer ke baad, files='+JSON.stringify(Object.keys(req.files||{}));
   const vf = req.files['video']?.[0]; if (!vf) { _lastRenderErr='STEP 0.6: VIDEO FILE NAHI MILI multer ke baad'; return res.status(400).json({ error: 'No video' }); }

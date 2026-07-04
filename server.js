@@ -4,9 +4,13 @@ const cors = require('cors');
 const fs = require('fs');
 const https = require('https');
 const app = express();
-app.use(express.json({ limit: '50mb' }));
 const upload = multer({ dest: '/tmp/uploads/', limits: { fileSize: 500 * 1024 * 1024 } });
 app.use(cors());
+// ── FIX: express.json() ab GLOBAL nahi hai — pehle ye har request (JSON content-type)
+// ka body intercept kar leta tha, jisse /api/bunny-upload (jo caption/banner JSON
+// bhejta hai) ko khaali stream milti thi aur Bunny par 0-byte file save ho jati thi.
+// Ab sirf un routes par lagega jinhe req.body chahiye. ──
+const jsonParser = express.json({ limit: '50mb' });
 
 const BUNNY_KEY = process.env.BUNNY_KEY || '';
 const BUNNY_ZONE = process.env.BUNNY_ZONE || '';
@@ -53,7 +57,7 @@ app.get('/', (req, res) => res.send('VyralJin Server OK'));
 app.get('/health', (req, res) => res.json({ status: 'ok', ver: 'v9.7-clean', ffmpeg: FFMPEG_BIN, bunny: !!BUNNY_KEY, gemini: !!GEMINI_KEY }));
 app.get('/api/config', (req, res) => res.json({ pullzone: BUNNY_PULLZONE, hasBunny: !!BUNNY_KEY, hasGemini: !!GEMINI_KEY }));
 
-app.post('/api/mark-shared', (req, res) => {
+app.post('/api/mark-shared', jsonParser, (req, res) => {
   const videoURL = req.body && req.body.videoURL;
   if (!videoURL) return res.status(400).json({ error: 'No videoURL' });
   shareCounts[videoURL] = (shareCounts[videoURL] || 0) + 1;
@@ -76,7 +80,7 @@ app.post('/api/uptest', upload.fields([{name:'video',maxCount:1}]), (req,res)=>{
   res.json({ok:true,size:sz});
 });
 
-app.post('/api/gemini', async (req, res) => {
+app.post('/api/gemini', jsonParser, async (req, res) => {
   if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });
   const prompt = req.body.prompt || '';
   if (!prompt) return res.status(400).json({ error: 'No prompt' });
@@ -133,7 +137,7 @@ app.get('/api/bunny-billing', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
-app.post('/api/railway-usage', (req, res) => {
+app.post('/api/railway-usage', jsonParser, (req, res) => {
   const token = req.query.token;
   const { query, variables } = req.body || {};
   if (!token || !query) return res.status(400).json({ error: 'Missing token/query' });

@@ -109,6 +109,22 @@ app.get('/api/bunny-list', (req, res) => {
   r.on('error',e=>res.status(500).json({error:e.message})); r.end();
 });
 
+// ── FIX: pull-zone (CDN) se turant readback karne par propagation-delay/negative-cache
+// ki wajah se 404 mil sakta hai, chahe file storage zone par pehle se maujood ho. Yeh
+// endpoint seedha Bunny STORAGE API se padhta hai (CDN cache bypass), isliye turant aur
+// bharosemand result deta hai — verification isi ko use karega jab bunny_key/zone available ho ──
+app.get('/api/bunny-download', (req, res) => {
+  if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
+  const file = req.query.file;
+  if (!file) return res.status(400).json({ error: 'No filename' });
+  const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(file),method:'GET',headers:{'AccessKey':BUNNY_KEY}},(resp)=>{
+    if (resp.statusCode >= 400) { res.status(resp.statusCode).end(); return; }
+    res.setHeader('Content-Type', resp.headers['content-type'] || 'application/octet-stream');
+    resp.pipe(res);
+  });
+  r.on('error', e => res.status(500).json({ error: e.message })); r.end();
+});
+
 app.post('/api/bunny-upload', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
   const file = req.query.file;

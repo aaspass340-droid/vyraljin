@@ -87,7 +87,13 @@ app.post('/api/gemini', jsonParser, async (req, res) => {
   if (!prompt) { console.log('[GEMINI] FAIL: No prompt in request body'); return res.status(400).json({ error: 'No prompt' }); }
   const maxTok = parseInt(req.body.maxTokens) || 8192;
   console.log('[GEMINI] Request received, promptLen=' + prompt.length + ', maxTokens=' + maxTok);
-  const body = JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9,maxOutputTokens:maxTok} });
+  // FIX: gemini-2.5-flash by default "thinking" (internal reasoning) tokens bhi
+  // maxOutputTokens budget mein se hi kaatta hai — isi wajah se poora budget
+  // sochne mein khatam ho jata tha aur asli visible caption sirf 100-200 chars
+  // ka reh jata tha (chahe HTTP 200 SUCCESS ho). thinkingBudget:0 se yeh
+  // internal reasoning bilkul band ho jati hai, taake poora token budget sirf
+  // asli caption text banane mein use ho.
+  const body = JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9,maxOutputTokens:maxTok,thinkingConfig:{thinkingBudget:0}} });
   const models = ['gemini-2.5-flash','gemini-2.5-flash-preview-04-17'];
   for (const m of models) {
     try {

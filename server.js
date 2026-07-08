@@ -81,10 +81,12 @@ app.post('/api/uptest', upload.fields([{name:'video',maxCount:1}]), (req,res)=>{
 });
 
 app.post('/api/gemini', jsonParser, async (req, res) => {
-  if (!GEMINI_KEY) return res.status(400).json({ error: 'No Gemini key' });
+  const _gT0 = Date.now();
+  if (!GEMINI_KEY) { console.log('[GEMINI] FAIL: No Gemini key configured on server'); return res.status(400).json({ error: 'No Gemini key' }); }
   const prompt = req.body.prompt || '';
-  if (!prompt) return res.status(400).json({ error: 'No prompt' });
+  if (!prompt) { console.log('[GEMINI] FAIL: No prompt in request body'); return res.status(400).json({ error: 'No prompt' }); }
   const maxTok = parseInt(req.body.maxTokens) || 8192;
+  console.log('[GEMINI] Request received, promptLen=' + prompt.length + ', maxTokens=' + maxTok);
   const body = JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.9,maxOutputTokens:maxTok} });
   const models = ['gemini-2.5-flash','gemini-2.5-flash-preview-04-17'];
   for (const m of models) {
@@ -93,13 +95,18 @@ app.post('/api/gemini', jsonParser, async (req, res) => {
         const rq = https.request({hostname:'generativelanguage.googleapis.com',path:'/v1beta/models/'+m+':generateContent?key='+GEMINI_KEY,method:'POST',headers:{'Content-Type':'application/json'}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>resolve({status:resp.statusCode,data:d}));});
         rq.on('error',reject); rq.write(body); rq.end();
       });
+      console.log('[GEMINI] Model ' + m + ' -> HTTP ' + r.status + ' (' + (Date.now()-_gT0) + 'ms)');
       if (r.status === 200) {
         const j = JSON.parse(r.data);
         const text = j?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        if (text) return res.json({ text });
+        if (text) { console.log('[GEMINI] SUCCESS with ' + m + ', textLen=' + text.length); return res.json({ text }); }
+        console.log('[GEMINI] Model ' + m + ' returned HTTP 200 but EMPTY text. Raw response: ' + r.data.slice(0,500));
+      } else {
+        console.log('[GEMINI] Model ' + m + ' error body: ' + r.data.slice(0,500));
       }
-    } catch(e) { continue; }
+    } catch(e) { console.log('[GEMINI] Model ' + m + ' threw exception: ' + e.message); continue; }
   }
+  console.log('[GEMINI] FAIL: all models exhausted, returning 500');
   res.status(500).json({ error: 'Gemini failed' });
 });
 
@@ -129,12 +136,27 @@ app.post('/api/bunny-upload', (req, res) => {
   if (!BUNNY_KEY || !BUNNY_ZONE) return res.status(400).json({ error: 'No bunny config' });
   const file = req.query.file;
   if (!file) return res.status(400).json({ error: 'No filename' });
+  // FIX: pehle hamesha 'video/mp4' Content-Type bhejta tha, chahe file JSON ya
+  // image ho — extension se sahi mime-type nikalo taake JSON/image sidecar files
+  // Bunny par sahi tarah save/serve hon.
+  const _extMimeMap = { '.json':'application/json', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.webp':'image/webp', '.mp4':'video/mp4' };
+  const _fext = ((file.match(/\.[^.]+$/) || [''])[0]).toLowerCase();
+  const _mime = _extMimeMap[_fext] || 'application/octet-stream';
   const chunks = [];
   req.on('data', c => chunks.push(c));
   req.on('end', () => {
     const bodyBuf = Buffer.concat(chunks);
-    const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(file),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':'video/mp4','Content-Length':bodyBuf.length}},(resp)=>{let d='';resp.on('data',c=>d+=c);resp.on('end',()=>res.json({status:resp.statusCode,ok:resp.statusCode<300,url:BUNNY_PULLZONE+'/'+file}));});
-    r.on('error',e=>res.status(500).json({error:e.message})); r.write(bodyBuf); r.end();
+    console.log('[BUNNY-UPLOAD] file=' + file + ', mime=' + _mime + ', size=' + bodyBuf.length + ' bytes');
+    if (bodyBuf.length === 0) console.log('[BUNNY-UPLOAD] WARNING: empty body for ' + file);
+    const r = https.request({hostname:'storage.bunnycdn.com',path:'/'+encodeURIComponent(BUNNY_ZONE)+'/'+encodeURIComponent(file),method:'PUT',headers:{'AccessKey':BUNNY_KEY,'Content-Type':_mime,'Content-Length':bodyBuf.length}},(resp)=>{
+      let d='';resp.on('data',c=>d+=c);
+      resp.on('end',()=>{
+        console.log('[BUNNY-UPLOAD] ' + file + ' -> Bunny HTTP ' + resp.statusCode);
+        res.json({status:resp.statusCode,ok:resp.statusCode<300,url:BUNNY_PULLZONE+'/'+file});
+      });
+    });
+    r.on('error',e=>{ console.log('[BUNNY-UPLOAD] ' + file + ' -> exception: ' + e.message); res.status(500).json({error:e.message}); });
+    r.write(bodyBuf); r.end();
   });
 });
 
